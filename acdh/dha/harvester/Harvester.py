@@ -14,7 +14,10 @@ def run():
 
     parser = argparse.ArgumentParser(description='OAI-PMH harvester for the DHA Catalogue service')
     parser.add_argument('oaipmhConnectionUrl', help='OAI-PMH connection URL in a form of "{OAI-PMH endpoint URL}#{metadataPrefix}#{set name (optional)}"')
+    parser.add_argument('sparqlUrl', help="Triplestore's SPARQL endpoint URL")
     parser.add_argument('--timeout', type=int, default=300, help='OAI-PMH request timeout (in seconds)')
+    parser.add_argument('--sparqlUser', help='HTTP basic auth user name to be used when communicating with the triplestore')
+    parser.add_argument('--sparqlPswd', help='HTTP basic auth password to be used when communicating with the triplestore')
     args = parser.parse_args()
 
     harvester = Harvester(args)
@@ -24,23 +27,26 @@ class Harvester:
     oaipmhNmsp = 'http://www.openarchives.org/OAI/2.0/'
     rdfNmsp = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
 
-    baseUrl = None
+    oaipmhUrl = None
     metadataPrefix = None
     setName = None
     timeout = None
+    sparqlUrl = None
+    sparqlAuth = None
 
     def __init__(self, args):
         tmp = args.oaipmhConnectionUrl.split('#')
-        self.baseUrl = tmp[0]
+        self.oaipmhUrl = tmp[0]
         self.metadataPrefix = tmp[1]
         self.setName = tmp[2] if len(tmp) > 2 else ''
 
         self.timeout = args.timeout
+        self.sparqlUrl = args.sparqlUrl
+
+        if args.sparqlUser != '' and args.sparqlPswd != '':
+            self.sparqlAuth = requests.auth.HTTPBasicAuth(args.sparqlUser, args.sparqlPswd)
 
     def harvest(self):
-        ids = self.oaipmhListIdentifiers()
-
-    def oaipmhListIdentifiers(self):
         response = self.makeOaipmhRequest('ListIdentifiers', set=self.setName)
         if response is None:
             logging.error('No records found')
@@ -48,6 +54,20 @@ class Harvester:
         n = 1
         N = len(response)
         logging.info('  %d records found' % len(response))
+        if N == 0:
+            return
+
+        logging.info("Removing data for the %s graph from the triplestore" % self.oaipmhUrl)
+        query = """
+            WITH <%s>
+            DELETE { ?s ?p ?o }
+            WHERE { ?s ?p ?o }
+        """ % self.oaipmhUrl #TODO how to properly escape RDF URI in Python?
+        res = self.makeSparqlRequest('update', query)
+        if res == False:
+            return
+        logging.info('  Removed')
+
         for record in response:
             logging.info('----------')
             logging.info('Processing record %d/%d (%d%%)' % (n, N, 100 * n / N))
@@ -68,18 +88,34 @@ class Harvester:
             
             graph = rdflib.Graph()
             try:
-                graph.parse(rdfxml, format='xml')
+                graph.parse(data=rdfxml, format='xml')
+                query = """
+                INSERT DATA { GRAPH <%s> { %s } }
+                """ % (self.oaipmhUrl, graph.serialize(format='nt')) #TODO how to properly escape RDF URI in Python?
+                res = self.makeSparqlRequest('update', query)
+                print(res)
             except rdflib.exceptions.ParserError as e:
                 logging.error('  Error while parsing metadata as RDF-XML: %s' % str(e))
                 logging.error(rdfxml.decode('utf-8'))
 
             n += 1
 
+    def makeSparqlRequest(self, operation, query):
+        data = {}
+        data[operation] = query
+        response = requests.post(self.sparqlUrl, data=data, auth=self.sparqlAuth)
+        if response.status_code != 200:
+            logging.error('  Triplestore communication error with code %d and message: %s' % (response.status_code, response.text))
+            return False
+        return True
+
+
+
     def makeOaipmhRequest(self, verb, **kwargs):
         xml = None
         nnsp = {'': 'http://www.openarchives.org/OAI/2.0/'}
 
-        reqStr = '%s?verb=%s&metadataPrefix=%s' % (self.baseUrl, verb, self.metadataPrefix)
+        reqStr = '%s?verb=%s&metadataPrefix=%s' % (self.oaipmhUrl, verb, self.metadataPrefix)
         param = {'verb': verb, 'metadataPrefix': self.metadataPrefix}
         for key, value in kwargs.items():
             if value is not None:
@@ -87,7 +123,7 @@ class Harvester:
                 reqStr += '&%s=%s' % (key, urllib.parse.quote(value))
 
         logging.info('Requesting %s' % reqStr)
-        response = requests.get(self.baseUrl, params=param, timeout=self.timeout)
+        response = requests.get(self.oaipmhUrl, params=param, timeout=self.timeout)
         if response.status_code != 200:
             logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
 
