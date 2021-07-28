@@ -83,9 +83,9 @@ class Harvester:
             rdfxml = recordxml.find('./record/metadata/rdf:RDF', {'': Harvester.oaipmhNmsp, 'rdf': Harvester.rdfNmsp})
             if rdfxml is None:
                 logging.error('  Wrong OAI-PMH - misses oaipmh:record/oaipmh:metadata/rdf:RDF element(s)')
-            rdfxml = ET.tostring(rdfxml, encoding='utf8', method='xml')
+            rdfxml = ET.tostring(rdfxml, encoding='UTF-8', method='xml').decode('utf-8')
             del recordxml
-            
+
             graph = rdflib.Graph()
             try:
                 graph.parse(data=rdfxml, format='xml')
