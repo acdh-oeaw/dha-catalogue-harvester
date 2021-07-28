@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "dha-harvester"
+version = "0.1.0"
+description = "OAI-PMH harvester for the DHA Catalogue"
+authors = ["Mateusz Żółtak <mateusz.zoltak@oeaw.ac.at>"]
+license = "MIT"
+repository = "https://github.com/acdh-oeaw/dha-catalogue-harvester"
+packages = [
+    {include = "acdh/dha/harvester"}
+]
+
+[tool.poetry.scripts]
+dha-harvester = "acdh.dha.harvester.Harvester:run"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+requests = "^2.26.0"
+rdflib = "^6.0.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
