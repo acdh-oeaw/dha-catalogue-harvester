@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import logging
 import requests
 import rdflib
@@ -10,7 +11,7 @@ import xml.etree.ElementTree as ET
 def run():
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
     parser = argparse.ArgumentParser(description='OAI-PMH harvester for the DHA Catalogue service')
     parser.add_argument('oaipmhConnectionUrl', help='OAI-PMH connection URL in a form of "{OAI-PMH endpoint URL}#{metadataPrefix}#{set name (optional)}"')
@@ -18,6 +19,7 @@ def run():
     parser.add_argument('--timeout', type=int, default=300, help='OAI-PMH request timeout (in seconds)')
     parser.add_argument('--sparqlUser', help='HTTP basic auth user name to be used when communicating with the triplestore')
     parser.add_argument('--sparqlPswd', help='HTTP basic auth password to be used when communicating with the triplestore')
+    parser.add_argument('--sparqlBatchSize', type=int, default = 1000, help='Maximum number of triples in a single SPARQL UPDATE query (adjust to your triplestore capabilities)')
     args = parser.parse_args()
 
     harvester = Harvester(args)
@@ -33,6 +35,10 @@ class Harvester:
     timeout = None
     sparqlUrl = None
     sparqlAuth = None
+    sparqlMode = None
+    sparqlBatchSize = None
+    sparqlGraph = None
+    triplesQueue = None
 
     def __init__(self, args):
         tmp = args.oaipmhConnectionUrl.split('#')
@@ -42,9 +48,12 @@ class Harvester:
 
         self.timeout = args.timeout
         self.sparqlUrl = args.sparqlUrl
+        self.sparqlBatchSize = args.sparqlBatchSize
 
         if args.sparqlUser != '' and args.sparqlPswd != '':
             self.sparqlAuth = requests.auth.HTTPBasicAuth(args.sparqlUser, args.sparqlPswd)
+
+        self.sparqlGraph = rdflib.term.URIRef(self.oaipmhUrl).n3()
 
     def harvest(self):
         response = self.makeOaipmhRequest('ListIdentifiers', set=self.setName)
@@ -59,18 +68,21 @@ class Harvester:
 
         logging.info("Removing data for the %s graph from the triplestore" % self.oaipmhUrl)
         query = """
-            WITH <%s>
+            WITH %s
             DELETE { ?s ?p ?o }
             WHERE { ?s ?p ?o }
-        """ % self.oaipmhUrl #TODO how to properly escape RDF URI in Python?
+        """ % self.sparqlGraph
         res = self.makeSparqlRequest('update', query)
         if res == False:
             return
         logging.info('  Removed')
 
+        self.triplesQueue = []
+        t0 = datetime.datetime.now()
         for record in response:
+            t = (datetime.datetime.now() - t0).total_seconds()
             logging.info('----------')
-            logging.info('Processing record %d/%d (%d%%)' % (n, N, 100 * n / N))
+            logging.info('Processing record %d/%d (%d%% elspased %d s ETA %d s)' % (n, N, 100 * n / N, t, N * t / n - t))
             idEl = record.find('identifier', {'': Harvester.oaipmhNmsp})
             if idEl is None:
                 logging.error('  Wrong OAI-PMH record - misses oaipmh:identifier element')
@@ -89,27 +101,33 @@ class Harvester:
             graph = rdflib.Graph()
             try:
                 graph.parse(data=rdfxml, format='xml')
-                query = """
-                INSERT DATA { GRAPH <%s> { %s } }
-                """ % (self.oaipmhUrl, graph.serialize(format='nt')) #TODO how to properly escape RDF URI in Python?
-                res = self.makeSparqlRequest('update', query)
-                print(res)
+                self.triplesQueue += graph.serialize(format='nt').split("\n")
+                self.insertTriples()
             except rdflib.exceptions.ParserError as e:
                 logging.error('  Error while parsing metadata as RDF-XML: %s' % str(e))
                 logging.error(rdfxml.decode('utf-8'))
 
             n += 1
+        self.insertTriples(True)
+
+    def insertTriples(self, force=False):
+        res = True
+        while res and (force or len(self.triplesQueue) > self.sparqlBatchSize) and len(self.triplesQueue) > 0:
+            logging.info("Sending triples batch to the triplestore (%d / %d)" % (min(self.sparqlBatchSize, len(self.triplesQueue)), len(self.triplesQueue)))
+            query = "INSERT DATA { GRAPH %s { %s } }" % (self.sparqlGraph, '\n'.join(self.triplesQueue[0:self.sparqlBatchSize])) 
+            self.triplesQueue = self.triplesQueue[self.sparqlBatchSize:]
+            res = self.makeSparqlRequest('update', query)
 
     def makeSparqlRequest(self, operation, query):
         data = {}
         data[operation] = query
+        logging.debug('Querying %s?%s={query}' % (self.sparqlUrl, operation))
         response = requests.post(self.sparqlUrl, data=data, auth=self.sparqlAuth)
         if response.status_code != 200:
             logging.error('  Triplestore communication error with code %d and message: %s' % (response.status_code, response.text))
+            print("\n\n"+query+"\n\n")
             return False
         return True
-
-
 
     def makeOaipmhRequest(self, verb, **kwargs):
         xml = None
