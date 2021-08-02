@@ -20,4 +20,4 @@ jobs:
     - name: install
       run: poetry install --no-dev --no-root
     - name: synchronize
-      run: poetry run dha-harvester ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser {{ env.SPARQL_USER }} --sparqlPswd {{ secrets.SPARQL_PSWD }}
+      run: poetry run dha-harvester ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser ${{ env.SPARQL_USER }} --sparqlPswd ${{ secrets.SPARQL_PSWD }}
