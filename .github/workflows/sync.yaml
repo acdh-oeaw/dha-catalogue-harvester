@@ -1,0 +1,19 @@
+name: sync
+on:
+  schedule:
+  - cron: '0 3 * * 0'
+jobs:
+  sync:
+    env:
+      OAIPMH_URL: https://arche.acdh.oeaw.ac.at/oaipmh/#dha
+      SPARQL_URL: https://triplestore.acdh-dev.oeaw.ac.at/dha-catalogue/sparql
+      SPARQL_USER: dha-catalogue
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2:
+    - uses: abatilo/actions-poetry@v2.0.0
+    - name: install
+      run: poetry install
+    - name: synchronize
+      run: poetry run dha-harvester ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser {{ env.SPARQL_USER }} --sparqlPswd {{ secrets.SPARQL_PSWD }}

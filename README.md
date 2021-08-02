@@ -16,3 +16,7 @@ An OAI-PMH harverster for the DHA Catalogue.
 
 ## Documentation
 
+## Scheduled synchronization
+
+The synchronization between the ARCHE production instance and the DHA triplestore is set up to run every Sunday using GitHub actions (see `.github/workflows/sync.yaml`).
+
