@@ -15,6 +15,6 @@ jobs:
     - uses: actions/setup-python@v2
     - uses: abatilo/actions-poetry@v2.0.0
     - name: install
-      run: poetry install
+      run: ls -l && ls -l dha-catalogue && poetry install
     - name: synchronize
       run: poetry run dha-harvester ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser {{ env.SPARQL_USER }} --sparqlPswd {{ secrets.SPARQL_PSWD }}
