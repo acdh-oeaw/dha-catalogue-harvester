@@ -14,8 +14,10 @@ jobs:
     - uses: actions/checkout@v2
     - uses: actions/setup-python@v2
     - uses: abatilo/actions-poetry@v2.0.0
-    - uses: mxschmitt/action-tmate@v3
+      with:
+        poetry-version: 1.1.7
+    #- uses: mxschmitt/action-tmate@v3
     - name: install
-      run: pwd && ls -l && poetry install
+      run: poetry install --no-dev --no-root
     - name: synchronize
       run: poetry run dha-harvester ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser {{ env.SPARQL_USER }} --sparqlPswd {{ secrets.SPARQL_PSWD }}
