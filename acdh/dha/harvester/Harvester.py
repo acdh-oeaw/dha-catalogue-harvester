@@ -16,7 +16,7 @@ def run():
     parser = argparse.ArgumentParser(description='OAI-PMH harvester for the DHA Catalogue service')
     parser.add_argument('oaipmhConnectionUrl', help='OAI-PMH connection URL in a form of "{OAI-PMH endpoint URL}#{metadataPrefix}#{set name (optional)}"')
     parser.add_argument('sparqlUrl', help="Triplestore's SPARQL endpoint URL")
-    parser.add_argument('--timeout', type=int, default=300, help='OAI-PMH request timeout (in seconds)')
+    parser.add_argument('--timeout', type=int, default=1800, help='OAI-PMH request timeout (in seconds)')
     parser.add_argument('--sparqlUser', help='HTTP basic auth user name to be used when communicating with the triplestore')
     parser.add_argument('--sparqlPswd', help='HTTP basic auth password to be used when communicating with the triplestore')
     parser.add_argument('--sparqlBatchSize', type=int, default = 1000, help='Maximum number of triples in a single SPARQL UPDATE query (adjust to your triplestore capabilities)')
