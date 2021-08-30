@@ -141,20 +141,26 @@ class Harvester:
                 reqStr += '&%s=%s' % (key, urllib.parse.quote(value))
 
         logging.info('Requesting %s' % reqStr)
-        response = requests.get(self.oaipmhUrl, params=param, timeout=self.timeout)
+        try:
+            response = requests.get(self.oaipmhUrl, params=param, timeout=self.timeout)
+        except requests.exceptions.ReadTimeout:
+            logging.error('  Timeout of %d seconds exceeded' % self.timeout)
+            return None
         if response.status_code != 200:
             logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
+            return None
 
         try:
             xml = ET.fromstring(response.text)
             del response
         except xml.etree.ElementTree.ParseError as e:
             logging.error('  Response is not a valid XML:\n%s' % response.text)
+            return None
 
         error = xml.find('error', {'': Harvester.oaipmhNmsp})
         if error is not None:
             logging.error('   Wrong OAI-PMH request: %s' % error.text)
-            xml = None
+            return None
 
         return xml.find(verb, {'': Harvester.oaipmhNmsp})
 
