@@ -146,7 +146,7 @@ class Harvester:
                 if response.status_code != 200:
                     logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
                     return None
-                for chunk in response.iter_content(1000000):
+                for chunk in response.iter_content(1000000, True):
                     rdfxml += chunk
             try:
                 xml = ET.fromstring(rdfxml)
