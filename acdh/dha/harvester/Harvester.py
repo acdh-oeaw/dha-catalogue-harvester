@@ -60,7 +60,7 @@ class Harvester:
         if response is None:
             logging.error('No records found')
             return
-        n = 1
+        n = 0
         N = len(response)
         logging.info('  %d records found' % len(response))
         if N == 0:
@@ -81,6 +81,7 @@ class Harvester:
         t0 = datetime.datetime.now()
         for record in response:
             t = (datetime.datetime.now() - t0).total_seconds()
+            n += 1
             logging.info('----------')
             logging.info('Processing record %d/%d (%d%% elspased %d s ETA %d s)' % (n, N, 100 * n / N, t, N * t / n - t))
             idEl = record.find('identifier', {'': Harvester.oaipmhNmsp})
@@ -106,8 +107,6 @@ class Harvester:
             except rdflib.exceptions.ParserError as e:
                 logging.error('  Error while parsing metadata as RDF-XML: %s' % str(e))
                 logging.error(rdfxml.decode('utf-8'))
-
-            n += 1
         self.insertTriples(True)
 
     def insertTriples(self, force=False):
@@ -142,25 +141,25 @@ class Harvester:
 
         logging.info('Requesting %s' % reqStr)
         try:
-            response = requests.get(self.oaipmhUrl, params=param, timeout=self.timeout)
+            rdfxml = ''
+            with requests.get(self.oaipmhUrl, params=param, timeout=self.timeout, stream=True) as response:
+                if response.status_code != 200:
+                    logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
+                    return None
+                for chunk in response.iter_content(1000000):
+                    rdfxml += chunk
+            try:
+                xml = ET.fromstring(rdfxml)
+            except xml.etree.ElementTree.ParseError as e:
+                logging.error('  Response is not a valid XML:\n%s' % response.text)
+                return None
+
+            error = xml.find('error', {'': Harvester.oaipmhNmsp})
+            if error is not None:
+                logging.error('   Wrong OAI-PMH request: %s' % error.text)
+                return None
+
+            return xml.find(verb, {'': Harvester.oaipmhNmsp})
         except requests.exceptions.ReadTimeout:
             logging.error('  Timeout of %d seconds exceeded' % self.timeout)
             return None
-        if response.status_code != 200:
-            logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
-            return None
-
-        try:
-            xml = ET.fromstring(response.text)
-            del response
-        except xml.etree.ElementTree.ParseError as e:
-            logging.error('  Response is not a valid XML:\n%s' % response.text)
-            return None
-
-        error = xml.find('error', {'': Harvester.oaipmhNmsp})
-        if error is not None:
-            logging.error('   Wrong OAI-PMH request: %s' % error.text)
-            return None
-
-        return xml.find(verb, {'': Harvester.oaipmhNmsp})
-
