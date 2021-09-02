@@ -17,6 +17,9 @@ def run():
     parser.add_argument('--sparqlUser', help='HTTP basic auth user name to be used when communicating with the triplestore')
     parser.add_argument('--sparqlPswd', help='HTTP basic auth password to be used when communicating with the triplestore')
     parser.add_argument('--sparqlBatchSize', type=int, default=150, help='Maximum SPARQL UPDATE query size (in kB)')
+    parser.add_argument('--sparqlRetries', type=int, default=2, help='Number of times a failing SPARQL UPDATE query is repeated before considering failure an error')
+    parser.add_argument('--sparqlContinueOnFailure', action='store_true', help='Should triplestore import continue on failure')
+    parser.add_argument('--oaipmhId', help='When present only a single OAI-PMH record with a given id is being processed')
     parser.add_argument('--tmpDir', default='.', help='Directory where harvested RDF data are stored before ingesting them into the triplestore')
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
@@ -41,6 +44,9 @@ class Harvester:
     sparqlMode = None
     sparqlBatchSize = None
     sparqlGraph = None
+    sparqlRetries = None
+    sparqlContinueOnFailure = None
+    oaipmhId = None
     tmpDir = None
 
     def __init__(self, args):
@@ -52,6 +58,10 @@ class Harvester:
         self.timeout = args.timeout
         self.sparqlUrl = args.sparqlUrl
         self.sparqlBatchSize = args.sparqlBatchSize * 1024
+        self.sparqlRetries = args.sparqlRetries
+        self.sparqlContinueOnFailure = args.sparqlContinueOnFailure
+
+        self.oaipmhId = args.oaipmhId
 
         self.tmpDir = args.tmpDir
 
@@ -61,8 +71,20 @@ class Harvester:
         self.sparqlGraph = rdflib.term.URIRef(self.oaipmhUrl).n3()
 
     def harvest(self):
-        triplesQueue = tempfile.TemporaryFile(dir=self.tmpDir)
-        
+        self.triplesQueue = tempfile.TemporaryFile(dir=self.tmpDir)
+       
+        if self.oaipmhId is None:
+            self.harvestAll()
+        else:
+            self.harvestRecord(self.oaipmhId)
+
+        res = self.cleanTriplestore()
+        if res == False:
+            return
+
+        self.insertTriples()
+
+    def harvestAll(self):
         response = self.makeOaipmhRequest('ListIdentifiers', set=self.setName)
         if response is None:
             logging.error('No records found')
@@ -83,25 +105,28 @@ class Harvester:
             if idEl is None:
                 logging.error('  Wrong OAI-PMH record - misses oaipmh:identifier element')
                 continue
-            
-            recordxml = self.makeOaipmhRequest('GetRecord', identifier=idEl.text)
-            if recordxml is None:
-                logging.error('  No data found')
-                continue
-            rdfxml = recordxml.find('./record/metadata/rdf:RDF', {'': Harvester.oaipmhNmsp, 'rdf': Harvester.rdfNmsp})
-            if rdfxml is None:
-                logging.error('  Wrong OAI-PMH - misses oaipmh:record/oaipmh:metadata/rdf:RDF element(s)')
-            rdfxml = ET.tostring(rdfxml, encoding='UTF-8', method='xml').decode('UTF-8')
-            del recordxml
+            self.harvestRecord(idEl.text)
 
-            graph = rdflib.Graph()
-            try:
-                graph.parse(data=rdfxml, format='xml')
-                triplesQueue.write(graph.serialize(format='nt').encode('UTF-8'))
-            except rdflib.exceptions.ParserError as e:
-                logging.error('  Error while parsing metadata as RDF-XML: %s' % str(e))
-                logging.error(rdfxml)
+    def harvestRecord(self, identifier):
+        recordxml = self.makeOaipmhRequest('GetRecord', identifier=identifier)
+        if recordxml is None:
+            logging.error('  No data found')
+            return
+        rdfxml = recordxml.find('./record/metadata/rdf:RDF', {'': Harvester.oaipmhNmsp, 'rdf': Harvester.rdfNmsp})
+        if rdfxml is None:
+            logging.error('  Wrong OAI-PMH - misses oaipmh:record/oaipmh:metadata/rdf:RDF element(s)')
+        rdfxml = ET.tostring(rdfxml, encoding='UTF-8', method='xml').decode('UTF-8')
+        del recordxml
 
+        graph = rdflib.Graph()
+        try:
+            graph.parse(data=rdfxml, format='xml')
+            self.triplesQueue.write(graph.serialize(format='nt').encode('UTF-8'))
+        except rdflib.exceptions.ParserError as e:
+            logging.error('  Error while parsing metadata as RDF-XML: %s' % str(e))
+            logging.error(rdfxml)
+
+    def cleanTriplestore(self):
         logging.info("Removing data for the %s graph from the triplestore" % self.oaipmhUrl)
         query = """
             WITH %s
@@ -109,21 +134,16 @@ class Harvester:
             WHERE { ?s ?p ?o }
         """ % self.sparqlGraph
         res = self.makeSparqlRequest('update', query)
-        if res == False:
-            return
-        logging.info('  Removed')
+        return res
 
-        self.insertTriples(triplesQueue)
-
-
-    def insertTriples(self, infile):
-        totalLen = infile.tell()
-        infile.seek(0)
+    def insertTriples(self):
+        totalLen = self.triplesQueue.tell()
+        self.triplesQueue.seek(0)
         batch = ''
         batchLen = 0
         sentLen = 0
         t0 = datetime.datetime.now()
-        for line in infile:
+        for line in self.triplesQueue:
             t = (datetime.datetime.now() - t0).total_seconds()
             lineLen = len(line)
             line = line.decode('UTF-8')
@@ -132,8 +152,10 @@ class Harvester:
                 logging.info("Sending triples batch to the triplestore (%d%% elapsed %d s ETA %d s)" % (100 * sentLen / totalLen, t, totalLen * t / sentLen - t))
                 query = "INSERT DATA { GRAPH " + self.sparqlGraph + " { " + batch + " } }"
                 res = self.makeSparqlRequest('update', query)
-                if res == False:
-                    break
+                if res == False and not self.sparqlContinueOnFailure:
+                    logging.error("Aborting triplestore update due to an error")
+                    self.cleanTriplestore()
+                    return False
                 batch = ''
                 batchLen = 0
             batch += line
@@ -141,17 +163,22 @@ class Harvester:
         logging.debug("Sending triples batch to the triplestore (%d/%d %d%%)" % (totalLen, totalLen, 100))
         query = "INSERT DATA { GRAPH " + self.sparqlGraph + " { " + batch + " } }"
         res = self.makeSparqlRequest('update', query)
+        return True
 
     def makeSparqlRequest(self, operation, query):
         data = {}
         data[operation] = query
         logging.debug('Querying %s?%s={query}' % (self.sparqlUrl, operation))
-        response = requests.post(self.sparqlUrl, data=data, auth=self.sparqlAuth)
-        if response.status_code != 200:
-            logging.error('  Triplestore communication error with code %d and message: %s' % (response.status_code, response.text))
-            print("\n\n"+query+"\n\n")
-            return False
-        return True
+        n = self.sparqlRetries
+        while n >= 0:
+            response = requests.post(self.sparqlUrl, data=data, auth=self.sparqlAuth)
+            if response.status_code == 200:
+                return True
+            else:
+                n -= 1
+                logging.error('  Triplestore communication error with code %d and message: %s' % (response.status_code, response.text))
+                print("\n\n"+query+"\n\n")
+        return False
 
     def makeOaipmhRequest(self, verb, **kwargs):
         xml = None
@@ -165,16 +192,23 @@ class Harvester:
                 reqStr += '&%s=%s' % (key, urllib.parse.quote(value))
 
         logging.info('Requesting %s' % reqStr)
+        t0 = datetime.datetime.now()
         try:
             rdfxml = ''
             with requests.get(self.oaipmhUrl, params=param, timeout=self.timeout, stream=True) as response:
+                t1 = datetime.datetime.now()
+                logging.debug('  response time %f seconds' % (t1 - t0).total_seconds())
                 if response.status_code != 200:
                     logging.error('  Request failed with code %d and message: ' % (response.status_code, response.text))
                     return None
                 for chunk in response.iter_content(1000000, True):
                     rdfxml += chunk
+                t0 = datetime.datetime.now()
+                logging.debug('  response body read time %f seconds' % (t0 - t1).total_seconds())
             try:
                 xml = ET.fromstring(rdfxml)
+                t1 = datetime.datetime.now()
+                logging.debug('  XML parsing time %f seconds' % (t1 - t0).total_seconds())
             except xml.etree.ElementTree.ParseError as e:
                 logging.error('  Response is not a valid XML:\n%s' % response.text)
                 return None
