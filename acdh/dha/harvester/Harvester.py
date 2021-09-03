@@ -5,6 +5,7 @@ import requests
 import rdflib
 import sys
 import tempfile
+import time
 import urllib
 import xml.etree.ElementTree as ET
 
@@ -177,7 +178,8 @@ class Harvester:
             else:
                 n -= 1
                 logging.error('  Triplestore communication error with code %d and message: %s' % (response.status_code, response.text))
-                print("\n\n"+query+"\n\n")
+                logging.debug('  Waiting 10 seconds before repeating the request')
+                time.sleep(10)
         return False
 
     def makeOaipmhRequest(self, verb, **kwargs):
