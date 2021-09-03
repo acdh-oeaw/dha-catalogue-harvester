@@ -219,6 +219,6 @@ class Harvester:
                 return None
 
             return xml.find(verb, {'': Harvester.oaipmhNmsp})
-        except requests.exceptions.ReadTimeout:
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) :
             logging.error('  Timeout of %d seconds exceeded' % self.timeout)
             return None
