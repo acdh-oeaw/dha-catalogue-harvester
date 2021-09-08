@@ -9,6 +9,7 @@ jobs:
       OAIPMH_URL: https://arche.acdh.oeaw.ac.at/oaipmh/#dha
       SPARQL_URL: https://triplestore.acdh-dev.oeaw.ac.at/dha-catalogue/sparql
       SPARQL_USER: dha-catalogue
+      VOCABS_NMSP: https://vocabs.acdh.oeaw.ac.at/
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -21,3 +22,5 @@ jobs:
       run: poetry install --no-dev --no-root
     - name: synchronize
       run: poetry run dha-harvester --sparqlContinueOnFailure --verbose ${{ env.OAIPMH_URL }} ${{ env.SPARQL_URL }} --sparqlUser ${{ env.SPARQL_USER }} --sparqlPswd ${{ secrets.SPARQL_PSWD }}
+    - name: vocabularies
+      run: poetry run dha-vocabsharvester ${{ env.SPARQL_URL }} ${{ env.VOCABS_NMSP }} --sparqlUser ${{ env.SPARQL_USER }} --sparqlPswd ${{ secrets.SPARQL_PSWD }}
