@@ -11,6 +11,7 @@ packages = [
 
 [tool.poetry.scripts]
 dha-harvester = "acdh.dha.harvester.Harvester:run"
+dha-vocabsharvester = "acdh.dha.harvester.VocabularyHarvester:run"
 
 [tool.poetry.dependencies]
 python = "^3.9"
