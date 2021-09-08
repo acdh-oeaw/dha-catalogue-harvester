@@ -17,6 +17,7 @@ def run():
     parser.add_argument('--timeout', type=int, default=1800, help='OAI-PMH request timeout (in seconds)')
     parser.add_argument('--sparqlUser', help='HTTP basic auth user name to be used when communicating with the triplestore')
     parser.add_argument('--sparqlPswd', help='HTTP basic auth password to be used when communicating with the triplestore')
+    parser.add_argument('--sparqlGraph', help='Import data into a given named graph in the triplestore (when deleting old data only this graph will be removed).')
     parser.add_argument('--sparqlBatchSize', type=int, default=150, help='Maximum SPARQL UPDATE query size (in kB)')
     parser.add_argument('--sparqlRetries', type=int, default=2, help='Number of times a failing SPARQL UPDATE query is repeated before considering failure an error')
     parser.add_argument('--sparqlContinueOnFailure', action='store_true', help='Should triplestore import continue on failure')
@@ -42,7 +43,6 @@ class Harvester:
     timeout = None
     sparqlUrl = None
     sparqlAuth = None
-    sparqlMode = None
     sparqlBatchSize = None
     sparqlGraph = None
     sparqlRetries = None
