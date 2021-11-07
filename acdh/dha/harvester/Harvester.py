@@ -79,6 +79,9 @@ class Harvester:
         else:
             self.harvestRecord(self.oaipmhId)
 
+        if self.triplesQueue.tell() == 0:
+            logging.error('No triples harvested')
+            return
         res = self.cleanTriplestore()
         if res == False:
             return
